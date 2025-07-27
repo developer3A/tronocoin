@@ -58,7 +58,7 @@ LANGUAGES = {
         'withdraw_amount': "💸 How much Tronocoin ($TRC) would you like to withdraw?",
         'invalid_amount': "❗ Please enter a valid number.",
         'insufficient_balance': "📉 Insufficient balance. You have: {balance} $TRC",
-        'not_registered': "🚫 You are not registered.",
+        'not_registered': "🚫 You are not registered. /start",
         'payment_instruction': "🔐 To cover blockchain fees and ensure system stability, send {fee} TON to the following address:\n`{wallet}`\n\n📝 Include the following memo:\n`{memo}`\n\n📌 Note: If the memo is not included, the payment will not be accepted.\n\n✅ After sending the payment, press /verify.",
         'verify_prompt': "Please press /verify after sending the payment.",
         'payment_checking': "⏳ Checking payment...",
@@ -88,7 +88,7 @@ LANGUAGES = {
         'ad_stats': "Ad performance statistics:\n{stats}",
         'earn_no_ads': "No new ads available at the moment.",
         'earn_caption': "💸 Earn {reward} $TRC!\n🔗 Channel: {link}\n📜 {description}",
-        'earn_limit_reached': "{link}\nReward limit reached.",
+        'earn_limit_reached': "{link} -\nReward limit reached and the advertisement has been removed.",
         'earn_already_received': "{link}\n✅ Reward already received.",
         'earn_not_subscribed': "{link}\n❌ You are not subscribed.",
         'earn_error': "{link}\n❌ Could not check channel: {error}",
@@ -345,6 +345,7 @@ async def process_trc_withdrawal(sender, trc_amount, memo):
         logger.error(f"Error in TRC withdrawal: {e}")
         return False
 
+
 @router.message(F.text.in_({LANGUAGES['en']['main_menu']['contact'], LANGUAGES['ru']['main_menu']['contact']}))
 async def start_contact(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -410,7 +411,7 @@ async def start_cmd(message: types.Message, state: FSMContext):
         user = await cursor.fetchone()
         if not user:
             referred_by = int(args) if args and args.isdigit() else None
-            await db.execute('INSERT INTO users (user_id, username, referred_by, language) VALUES (?, ?, ?, ?)', (user_id, username, referred_by, language))
+            await db.execute('INSERT OR IGNORE INTO users (user_id, username, referred_by, language) VALUES (?, ?, ?, ?)', (user_id, username, referred_by, language))
             await db.commit()
             if referred_by:
                 await db.execute('UPDATE users SET balance = balance + ? WHERE user_id=?', (REFERRAL_BONUS, referred_by))
@@ -830,6 +831,7 @@ async def broadcast_text(message: types.Message, state: FSMContext):
             users = await cursor.fetchall()
     for user in users:
         try:
+            print(user[0])
             await message.bot.send_message(user[0], message.text)
         except TelegramForbiddenError:
             pass
@@ -1092,6 +1094,7 @@ async def earn_handler(message: types.Message, state: FSMContext):
 
 @router.callback_query(F.data == "check_earn")
 async def check_earn_callback(callback: types.CallbackQuery, state: FSMContext):
+    global ads_data
     user_id = callback.from_user.id
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute('SELECT language, earned_channels, balance FROM users WHERE user_id=?', (user_id,))
@@ -1124,11 +1127,13 @@ async def check_earn_callback(callback: types.CallbackQuery, state: FSMContext):
         member = await callback.bot.get_chat_member(channel_username, user_id)
         if member.status in ["member", "administrator", "creator"]:
             if ad["link"] not in user_channels:
-                if not ad.get("limit_removed", False):
-                    if ad.get("trc_given", 0) + ad["reward"] > ad["trc_limit"]:
-                        await callback.message.answer(LANGUAGES[language]['earn_limit_reached'].format(link=ad['link']))
-                        await callback.answer()
-                        return
+                # if not ad.get("limit_removed", False):
+                #     if ad.get("trc_given", 0) + ad["reward"] > ad["trc_limit"]:
+                #         await callback.message.answer(LANGUAGES[language]['earn_limit_reached'].format(link=ad['link']))
+                #         await callback.answer()
+                #         ads_data = [item for item in ads_data if item.get("link") != ad["link"]]
+                #         await bot.send_message(ADMIN_ID, f"{ad["link"]}  - Rekalma o'chirildi.")
+                #         return
                 # Balansni yangilash va kanalni qo‘shish
                 new_channels = user_channels + [ad["link"]]
                 ad["trc_given"] = ad.get("trc_given", 0) + ad["reward"]
@@ -1140,6 +1145,12 @@ async def check_earn_callback(callback: types.CallbackQuery, state: FSMContext):
                     )
                     await db.commit()
                 await callback.message.answer(f"✅ {ad['link']} awarded {ad['reward']} TRC")
+                #limitga yetgan kanalni ochirib yuborish| TRC ishlagan oxirgi userdan keyin ochiriladi.
+                if not ad.get("limit_removed", False):
+                    if ad.get("trc_given", 0) + ad["reward"] > ad["trc_limit"]:
+                        await callback.answer()
+                        ads_data = [item for item in ads_data if item.get("link") != ad["link"]]
+                        await bot.send_message(ADMIN_ID, LANGUAGES[language]['earn_limit_reached'].format(link=ad['link']))
             else:
                 await callback.message.answer(LANGUAGES[language]['earn_already_received'].format(link=ad['link']))
         else:
@@ -1216,5 +1227,3 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-
-
