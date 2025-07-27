@@ -831,7 +831,6 @@ async def broadcast_text(message: types.Message, state: FSMContext):
             users = await cursor.fetchall()
     for user in users:
         try:
-            print(user[0])
             await message.bot.send_message(user[0], message.text)
         except TelegramForbiddenError:
             pass
